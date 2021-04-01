@@ -1,11 +1,12 @@
 ﻿using BepInEx;
 using BepInEx.Logging;
-using R2API.Utils;
+using MonoMod.RuntimeDetour.HookGen;
 using RoR2;
 using RoR2.Networking;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Security;
 using System.Security.Permissions;
 using System.Text.RegularExpressions;
@@ -13,14 +14,16 @@ using UnityEngine;
 
 [module: UnverifiableCode]
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
+[assembly: R2API.Utils.ManualNetworkRegistration]
+[assembly: EnigmaticThunder.Util.ManualNetworkRegistration]
 namespace MidRunArtifacts
 {
-    [R2APISubmoduleDependency(nameof(CommandHelper))]
-    [NetworkCompatibility(CompatibilityLevel.NoNeedForSync)]
-    [BepInDependency("com.bepis.r2api", BepInDependency.DependencyFlags.HardDependency)]
-    [BepInPlugin("com.KingEnderBrine.MidRunArtifacts", "Mid Run Artifacts", "1.0.0")]
+    [BepInPlugin("com.KingEnderBrine.MidRunArtifacts", "Mid Run Artifacts", "1.1.0")]
     public class MidRunArtifactsPlugin : BaseUnityPlugin
     {
+        private static readonly ConstructorInfo autoCompleteCtor = typeof(RoR2.Console.AutoComplete).GetConstructor(new[] { typeof(RoR2.Console) });
+        private static readonly MethodInfo consoleAwake = typeof(RoR2.Console).GetMethod(nameof(RoR2.Console.Awake), BindingFlags.NonPublic | BindingFlags.Instance);
+
         internal static MidRunArtifactsPlugin Instance { get; private set; }
         internal static ManualLogSource InstanceLogger { get => Instance?.Logger; }
 
@@ -43,19 +46,19 @@ namespace MidRunArtifacts
         {
             Instance = this;
 
-            CommandHelper.AddToConsoleWhenReady();
-
-            On.RoR2.Console.AutoComplete.ctor += CommandArgsAutoCompletion;
+            HookEndpointManager.Add(consoleAwake, (Action<Action<RoR2.Console>, RoR2.Console>)RegisterCommands);
+            HookEndpointManager.Add(autoCompleteCtor, (Action<Action<RoR2.Console.AutoComplete, RoR2.Console>, RoR2.Console.AutoComplete, RoR2.Console>)CommandArgsAutoCompletion);
         }
 
         private void Destroy()
         {
             Instance = null;
-         
-            On.RoR2.Console.AutoComplete.ctor -= CommandArgsAutoCompletion;
+
+            HookEndpointManager.Remove(consoleAwake, (Action<Action<RoR2.Console>, RoR2.Console>)RegisterCommands);
+            HookEndpointManager.Remove(autoCompleteCtor, (Action<Action<RoR2.Console.AutoComplete, RoR2.Console>, RoR2.Console.AutoComplete, RoR2.Console>)CommandArgsAutoCompletion);
         }
 
-        private static void CommandArgsAutoCompletion(On.RoR2.Console.AutoComplete.orig_ctor orig, RoR2.Console.AutoComplete self, RoR2.Console console)
+        private static void CommandArgsAutoCompletion(Action<RoR2.Console.AutoComplete, RoR2.Console> orig, RoR2.Console.AutoComplete self, RoR2.Console console)
         {
             orig(self, console);
 
@@ -82,10 +85,33 @@ namespace MidRunArtifacts
             return result;
         }
 
-        [ConCommand(commandName = "mra_enable", flags = ConVarFlags.SenderMustBeServer, helpText = "Enable artifact")]
+        private static void RegisterCommands(Action<RoR2.Console> orig, RoR2.Console self)
+        {
+            try
+            {
+                self.concommandCatalog["mra_enable"] = new RoR2.Console.ConCommand
+                {
+                    action = CCEnable,
+                    flags = ConVarFlags.SenderMustBeServer,
+                    helpText = "Enable artifact"
+                };
+
+                self.concommandCatalog["mra_disable"] = new RoR2.Console.ConCommand
+                {
+                    action = CCDisable,
+                    flags = ConVarFlags.SenderMustBeServer,
+                    helpText = "Disable artifact"
+                };
+            }
+            catch { }
+
+            orig(self);
+        }
+
+        //[ConCommand(commandName = "mra_enable", flags = ConVarFlags.SenderMustBeServer, helpText = "Enable artifact")]
         private static void CCEnable(ConCommandArgs args) => ToggleArtifact(args, true);
 
-        [ConCommand(commandName = "mra_disable", flags = ConVarFlags.SenderMustBeServer, helpText = "Disable artifact")]
+        //[ConCommand(commandName = "mra_disable", flags = ConVarFlags.SenderMustBeServer, helpText = "Disable artifact")]
         private static void CCDisable(ConCommandArgs args) => ToggleArtifact(args, false);
 
         private static void ToggleArtifact(ConCommandArgs args, bool newState)
@@ -96,7 +122,7 @@ namespace MidRunArtifacts
                 Debug.Log("You can only use this command while in a run");
                 return;
             }
-            Debug.Log(GameNetworkManager.singleton);
+
             if (GameNetworkManager.singleton.desiredHost.hostingParameters.listen == true && !SteamworksLobbyManager.ownsLobby)
             {
                 Debug.Log("You must be a lobby leader to use this command");
@@ -137,4 +163,16 @@ namespace MidRunArtifacts
             return Regex.Replace(Language.GetString(artifactDef.nameToken), "[ '-]", String.Empty);
         }
     }
+}
+
+namespace R2API.Utils
+{
+    [AttributeUsage(AttributeTargets.Assembly)]
+    public class ManualNetworkRegistrationAttribute : Attribute { }
+}
+
+namespace EnigmaticThunder.Util
+{
+    [AttributeUsage(AttributeTargets.Assembly)]
+    public class ManualNetworkRegistrationAttribute : Attribute { }
 }
