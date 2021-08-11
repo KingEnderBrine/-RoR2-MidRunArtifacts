@@ -14,11 +14,9 @@ using UnityEngine;
 
 [module: UnverifiableCode]
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
-[assembly: R2API.Utils.ManualNetworkRegistration]
-[assembly: EnigmaticThunder.Util.ManualNetworkRegistration]
 namespace MidRunArtifacts
 {
-    [BepInPlugin("com.KingEnderBrine.MidRunArtifacts", "Mid Run Artifacts", "1.1.0")]
+    [BepInPlugin("com.KingEnderBrine.MidRunArtifacts", "Mid Run Artifacts", "1.1.1")]
     public class MidRunArtifactsPlugin : BaseUnityPlugin
     {
         private static readonly ConstructorInfo autoCompleteCtor = typeof(RoR2.Console.AutoComplete).GetConstructor(new[] { typeof(RoR2.Console) });
@@ -80,6 +78,7 @@ namespace MidRunArtifacts
             var result = new List<string>();
             result.AddRange(artifactNames.Select(el => $"mra_enable {el}"));
             result.AddRange(artifactNames.Select(el => $"mra_disable {el}"));
+            result.AddRange(artifactNames.Select(el => $"mra_toggle {el}"));
             result.Sort();
 
             return result;
@@ -102,6 +101,13 @@ namespace MidRunArtifacts
                     flags = ConVarFlags.SenderMustBeServer,
                     helpText = "Disable artifact"
                 };
+
+                self.concommandCatalog["mra_toggle"] = new RoR2.Console.ConCommand
+                {
+                    action = CCToggle,
+                    flags = ConVarFlags.SenderMustBeServer,
+                    helpText = "Toggle artifact"
+                };
             }
             catch { }
 
@@ -113,8 +119,9 @@ namespace MidRunArtifacts
 
         //[ConCommand(commandName = "mra_disable", flags = ConVarFlags.SenderMustBeServer, helpText = "Disable artifact")]
         private static void CCDisable(ConCommandArgs args) => ToggleArtifact(args, false);
+        private static void CCToggle(ConCommandArgs args) => ToggleArtifact(args);
 
-        private static void ToggleArtifact(ConCommandArgs args, bool newState)
+        private static void ToggleArtifact(ConCommandArgs args, bool? newState = null)
         {
             if (!RunArtifactManager.instance)
             {
@@ -143,7 +150,7 @@ namespace MidRunArtifacts
                 return;
             }
 
-            RunArtifactManager.instance.SetArtifactEnabledServer(def, newState);
+            RunArtifactManager.instance.SetArtifactEnabledServer(def, newState ?? !RunArtifactManager.instance.IsArtifactEnabled(def));
         }
 
         private static ArtifactDef GetArtifactDefFromString(string partialName)
@@ -163,16 +170,4 @@ namespace MidRunArtifacts
             return Regex.Replace(Language.GetString(artifactDef.nameToken), "[ '-]", String.Empty);
         }
     }
-}
-
-namespace R2API.Utils
-{
-    [AttributeUsage(AttributeTargets.Assembly)]
-    public class ManualNetworkRegistrationAttribute : Attribute { }
-}
-
-namespace EnigmaticThunder.Util
-{
-    [AttributeUsage(AttributeTargets.Assembly)]
-    public class ManualNetworkRegistrationAttribute : Attribute { }
 }
