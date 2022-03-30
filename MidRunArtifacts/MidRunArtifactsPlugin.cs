@@ -11,14 +11,21 @@ using System.Security;
 using System.Security.Permissions;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using static HG.Reflection.SearchableAttribute;
 
-[module: UnverifiableCode]
+[assembly: OptIn()]
 [assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]
+[assembly: AssemblyVersion(MidRunArtifacts.MidRunArtifactsPlugin.Version)]
 namespace MidRunArtifacts
 {
-    [BepInPlugin("com.KingEnderBrine.MidRunArtifacts", "Mid Run Artifacts", "1.1.1")]
+
+    [BepInPlugin(GUID, Name, Version)]
     public class MidRunArtifactsPlugin : BaseUnityPlugin
     {
+        public const string GUID = "com.KingEnderBrine.MidRunArtifacts";
+        public const string Name = "Mid Run Artifacts";
+        public const string Version = "1.2.0";
+
         private static readonly ConstructorInfo autoCompleteCtor = typeof(RoR2.Console.AutoComplete).GetConstructor(new[] { typeof(RoR2.Console) });
         private static readonly MethodInfo consoleAwake = typeof(RoR2.Console).GetMethod(nameof(RoR2.Console.Awake), BindingFlags.NonPublic | BindingFlags.Instance);
 
@@ -44,7 +51,6 @@ namespace MidRunArtifacts
         {
             Instance = this;
 
-            HookEndpointManager.Add(consoleAwake, (Action<Action<RoR2.Console>, RoR2.Console>)RegisterCommands);
             HookEndpointManager.Add(autoCompleteCtor, (Action<Action<RoR2.Console.AutoComplete, RoR2.Console>, RoR2.Console.AutoComplete, RoR2.Console>)CommandArgsAutoCompletion);
         }
 
@@ -52,7 +58,6 @@ namespace MidRunArtifacts
         {
             Instance = null;
 
-            HookEndpointManager.Remove(consoleAwake, (Action<Action<RoR2.Console>, RoR2.Console>)RegisterCommands);
             HookEndpointManager.Remove(autoCompleteCtor, (Action<Action<RoR2.Console.AutoComplete, RoR2.Console>, RoR2.Console.AutoComplete, RoR2.Console>)CommandArgsAutoCompletion);
         }
 
@@ -84,41 +89,13 @@ namespace MidRunArtifacts
             return result;
         }
 
-        private static void RegisterCommands(Action<RoR2.Console> orig, RoR2.Console self)
-        {
-            try
-            {
-                self.concommandCatalog["mra_enable"] = new RoR2.Console.ConCommand
-                {
-                    action = CCEnable,
-                    flags = ConVarFlags.SenderMustBeServer,
-                    helpText = "Enable artifact"
-                };
-
-                self.concommandCatalog["mra_disable"] = new RoR2.Console.ConCommand
-                {
-                    action = CCDisable,
-                    flags = ConVarFlags.SenderMustBeServer,
-                    helpText = "Disable artifact"
-                };
-
-                self.concommandCatalog["mra_toggle"] = new RoR2.Console.ConCommand
-                {
-                    action = CCToggle,
-                    flags = ConVarFlags.SenderMustBeServer,
-                    helpText = "Toggle artifact"
-                };
-            }
-            catch { }
-
-            orig(self);
-        }
-
-        //[ConCommand(commandName = "mra_enable", flags = ConVarFlags.SenderMustBeServer, helpText = "Enable artifact")]
+        [ConCommand(commandName = "mra_enable", flags = ConVarFlags.SenderMustBeServer, helpText = "Enable artifact")]
         private static void CCEnable(ConCommandArgs args) => ToggleArtifact(args, true);
 
-        //[ConCommand(commandName = "mra_disable", flags = ConVarFlags.SenderMustBeServer, helpText = "Disable artifact")]
+        [ConCommand(commandName = "mra_disable", flags = ConVarFlags.SenderMustBeServer, helpText = "Disable artifact")]
         private static void CCDisable(ConCommandArgs args) => ToggleArtifact(args, false);
+
+        [ConCommand(commandName = "mra_toggle", flags = ConVarFlags.SenderMustBeServer, helpText = "Toggle artifact")]
         private static void CCToggle(ConCommandArgs args) => ToggleArtifact(args);
 
         private static void ToggleArtifact(ConCommandArgs args, bool? newState = null)
@@ -130,7 +107,7 @@ namespace MidRunArtifacts
                 return;
             }
 
-            if (GameNetworkManager.singleton.desiredHost.hostingParameters.listen == true && !SteamworksLobbyManager.ownsLobby)
+            if (NetworkManagerSystem.singleton?.desiredHost.hostingParameters.listen == true && !PlatformSystems.lobbyManager.ownsLobby)
             {
                 Debug.Log("You must be a lobby leader to use this command");
                 return;

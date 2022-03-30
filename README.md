@@ -11,9 +11,11 @@ To open a console first time press `ctrl` + `alt` + \`, after that you can use j
 # Bugs
 Feel free to ping me on discord `@KingEnderBrine` if you found one.  
   
-If you want to support me, [you can do it here](https://www.buymeacoffee.com/KingEnderBrine)
-
 # Changelog
+**1.2.0**
+
+* Fixes for `Survivors of the Void` update
+
 **1.1.1**
 
 * Added `mra_toggle` command.
