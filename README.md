@@ -8,22 +8,9 @@ To open a console first time press `ctrl` + `alt` + \`, after that you can use j
 * `mra_disable {ArtifactName}` - disables artifact with a given name (no spaces in the name).
 * `mra_toggle {ArtifactName}` - disables artifact with a given name (no spaces in the name) if it was enabled, otherwise enables it.
 
+# Config options
+
+* `EnableChatCommands` - Accept commands from any player in chat.
+
 # Bugs
 Feel free to ping me on discord `@KingEnderBrine` if you found one.  
-  
-# Changelog
-**1.2.0**
-
-* Fixes for `Survivors of the Void` update
-
-**1.1.1**
-
-* Added `mra_toggle` command.
-
-**1.1.0**
-
-* Removed r2api dependency.
-
-**1.0.0**
-
-* Mod release.

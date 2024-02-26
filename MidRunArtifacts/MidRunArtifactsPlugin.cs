@@ -1,16 +1,16 @@
 ﻿using BepInEx;
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using MonoMod.RuntimeDetour.HookGen;
 using RoR2;
-using RoR2.Networking;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Security;
 using System.Security.Permissions;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using UnityEngine.Networking;
 using static HG.Reflection.SearchableAttribute;
 
 [assembly: OptIn()]
@@ -24,10 +24,10 @@ namespace MidRunArtifacts
     {
         public const string GUID = "com.KingEnderBrine.MidRunArtifacts";
         public const string Name = "Mid Run Artifacts";
-        public const string Version = "1.2.0";
+        public const string Version = "1.2.1";
 
         private static readonly ConstructorInfo autoCompleteCtor = typeof(RoR2.Console.AutoComplete).GetConstructor(new[] { typeof(RoR2.Console) });
-        private static readonly MethodInfo consoleAwake = typeof(RoR2.Console).GetMethod(nameof(RoR2.Console.Awake), BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly MethodInfo chatAddMessage = typeof(Chat).GetMethod(nameof(Chat.CCSay), BindingFlags.NonPublic | BindingFlags.Static, null, new[] { typeof(ConCommandArgs)}, null);
 
         internal static MidRunArtifactsPlugin Instance { get; private set; }
         internal static ManualLogSource InstanceLogger { get => Instance?.Logger; }
@@ -47,11 +47,19 @@ namespace MidRunArtifacts
             }
         }
 
+        public static ConfigEntry<bool> EnableChatCommands { get; set; }
+
         private void Awake()
         {
             Instance = this;
 
+            EnableChatCommands = Config.Bind("Main", "EnableChatCommands", false, "Accept commands from any player in chat");
+
             HookEndpointManager.Add(autoCompleteCtor, (Action<Action<RoR2.Console.AutoComplete, RoR2.Console>, RoR2.Console.AutoComplete, RoR2.Console>)CommandArgsAutoCompletion);
+            if (EnableChatCommands.Value)
+            {
+                HookEndpointManager.Add(chatAddMessage, (Action<Action<ConCommandArgs>, ConCommandArgs>)OnChatAddMessage);
+            }
         }
 
         private void Destroy()
@@ -59,6 +67,66 @@ namespace MidRunArtifacts
             Instance = null;
 
             HookEndpointManager.Remove(autoCompleteCtor, (Action<Action<RoR2.Console.AutoComplete, RoR2.Console>, RoR2.Console.AutoComplete, RoR2.Console>)CommandArgsAutoCompletion);
+            if (EnableChatCommands.Value)
+            {
+                HookEndpointManager.Remove(chatAddMessage, (Action<Action<ConCommandArgs>, ConCommandArgs>)OnChatAddMessage);
+            }
+        }
+
+        private static void OnChatAddMessage(Action<ConCommandArgs> orig, ConCommandArgs args)
+        {
+            orig(args);
+
+            if (!NetworkServer.active || !RunArtifactManager.instance)
+            {
+                return;
+            }
+
+            if (!args[0].StartsWith("/"))
+            {
+                return;
+            }
+
+            var lexer = new RoR2.Console.Lexer(args[0]);
+            var command = lexer.NextToken();
+            if (command is null)
+            {
+                return;
+            }
+
+            bool? newState;
+            switch (command)
+            {
+                case "mra_enable":
+                    newState = true;
+                    break;
+                case "mra_disable":
+                    newState = false;
+                    break;
+                case "mra_toggle":
+                    newState = null;
+                    break;
+                default:
+                    return;
+            }
+
+            var userArgs = new List<string>();
+            while (true)
+            {
+                var arg = lexer.NextToken();
+                if (arg is null || arg == ";")
+                {
+                    break;
+                }
+                userArgs.Add(arg);
+            }
+
+            ToggleArtifact(new ConCommandArgs
+            {
+                userArgs = userArgs,
+                commandName = command,
+                sender = args.sender
+            }, newState, true);
         }
 
         private static void CommandArgsAutoCompletion(Action<RoR2.Console.AutoComplete, RoR2.Console> orig, RoR2.Console.AutoComplete self, RoR2.Console console)
@@ -78,7 +146,11 @@ namespace MidRunArtifacts
 
         private static List<string> GatherCommandsAutocomplete()
         {
-            var artifactNames = ArtifactCatalog.artifactDefs.Select(GetArgNameForAtrifact);
+            var artifactNames = ArtifactCatalog.artifactDefs.Select(a => GetArgNameForArtifact(a, false));
+            if (Language.currentLanguage.name != Language.english.name)
+            {
+                artifactNames = artifactNames.Union(ArtifactCatalog.artifactDefs.Select(a => GetArgNameForArtifact(a, true)));
+            }
 
             var result = new List<string>();
             result.AddRange(artifactNames.Select(el => $"mra_enable {el}"));
@@ -98,24 +170,24 @@ namespace MidRunArtifacts
         [ConCommand(commandName = "mra_toggle", flags = ConVarFlags.SenderMustBeServer, helpText = "Toggle artifact")]
         private static void CCToggle(ConCommandArgs args) => ToggleArtifact(args);
 
-        private static void ToggleArtifact(ConCommandArgs args, bool? newState = null)
+        private static void ToggleArtifact(ConCommandArgs args, bool? newState = null, bool fromChat = false)
         {
             if (!RunArtifactManager.instance)
             {
                 //Using Debug.Log because messages from InstanceLogger are not shown in in-game console
-                Debug.Log("You can only use this command while in a run");
+                LogMessage("You can only use this command while in a run");
                 return;
             }
 
-            if (NetworkManagerSystem.singleton?.desiredHost.hostingParameters.listen == true && !PlatformSystems.lobbyManager.ownsLobby)
+            if (!NetworkServer.active)
             {
-                Debug.Log("You must be a lobby leader to use this command");
+                LogMessage("You must be a host to use this command");
                 return;
             }
 
             if (args.Count == 0)
             {
-                Debug.Log("No arguments supplied");
+                LogMessage("No arguments supplied");
                 return;
             }
 
@@ -123,18 +195,34 @@ namespace MidRunArtifacts
 
             if (!def)
             {
-                Debug.Log("Artifact with a given name was not found.");
+                LogMessage("Artifact with a given name was not found.");
                 return;
             }
 
             RunArtifactManager.instance.SetArtifactEnabledServer(def, newState ?? !RunArtifactManager.instance.IsArtifactEnabled(def));
+
+            void LogMessage(string message)
+            {
+                if (fromChat)
+                {
+                    Chat.SendBroadcastChat(new Chat.SimpleChatMessage
+                    {
+                        baseToken = message
+                    });
+                }
+                else
+                {
+                    Debug.Log(message);
+                }
+            }
         }
 
         private static ArtifactDef GetArtifactDefFromString(string partialName)
         {
             foreach (var artifact in ArtifactCatalog.artifactDefs)
             {
-                if (GetArgNameForAtrifact(artifact).ToLower().Contains(partialName.ToLower()))
+                if (GetArgNameForArtifact(artifact, false).ToLower().Contains(partialName.ToLower()) ||
+                    (Language.english.name != Language.currentLanguage.name && GetArgNameForArtifact(artifact, true).ToLower().Contains(partialName.ToLower())))
                 {
                     return artifact;
                 }
@@ -142,9 +230,9 @@ namespace MidRunArtifacts
             return null;
         }
 
-        private static string GetArgNameForAtrifact(ArtifactDef artifactDef)
+        private static string GetArgNameForArtifact(ArtifactDef artifactDef, bool english)
         {
-            return Regex.Replace(Language.GetString(artifactDef.nameToken), "[ '-]", String.Empty);
+            return Regex.Replace(Language.GetString(artifactDef.nameToken, english ? Language.english.name : Language.currentLanguage.name), "[ '-]", String.Empty);
         }
     }
 }
